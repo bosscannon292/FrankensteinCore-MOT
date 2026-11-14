@@ -1,0 +1,6 @@
+name: FrankensteinCore
+main: com.frankenstein.core.FrankensteinCore
+version: "1.0.0"
+api: ["1.0.0"]
+author: FrankensteinTeam
+description: Custom Nukkit-MOT Core
