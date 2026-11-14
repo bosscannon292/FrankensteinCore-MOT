@@ -27,12 +27,18 @@ commands:
   back:
     description: Вернуться назад
     usage: "/back"
+  spawn:
+    description: Вернуться на спавн
+    usage: "/spawn"
   fly:
     description: Полёт
     usage: "/fly"
   v:
     description: Невидимость
     usage: "/v"
+  gm:
+    description: Изменить режим игры
+    usage: "/gm <0-3>"
   mute:
     description: Выдать мут
     usage: "/mute <игрок>"
