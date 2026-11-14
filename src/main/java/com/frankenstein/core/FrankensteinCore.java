@@ -1,73 +1,132 @@
+
 package com.frankenstein.core;
 
 import cn.nukkit.Player;
 import cn.nukkit.command.Command;
 import cn.nukkit.command.CommandSender;
+import cn.nukkit.level.Level;
+import cn.nukkit.level.Location;
 import cn.nukkit.plugin.PluginBase;
 import cn.nukkit.utils.Config;
 
 import java.io.File;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 public class FrankensteinCore extends PluginBase {
 
     private Config homes;
     private Config mutes;
+
     private final Map<String, String> requests = new HashMap<>();
-    private final Map<String, Boolean> vanished = new HashMap<>();
+    private final Map<String, Location> backs = new HashMap<>();
     private final Map<String, Boolean> flying = new HashMap<>();
-    private final Map<String, cn.nukkit.level.Location> backs = new HashMap<>();
+    private final Map<String, Boolean> vanished = new HashMap<>();
 
     @Override
     public void onEnable() {
-        if (!getDataFolder().exists()) getDataFolder().mkdirs();
+        getDataFolder().mkdirs();
 
-        homes = new Config(new File(getDataFolder(), "homes.yml"), Config.YAML);
-        mutes = new Config(new File(getDataFolder(), "mutes.yml"), Config.YAML);
+        homes = new Config(
+            new File(getDataFolder(), "homes.yml"),
+            Config.YAML
+        );
 
-        getServer().getPluginManager().registerEvents(new CoreListener(this), this);
+        mutes = new Config(
+            new File(getDataFolder(), "mutes.yml"),
+            Config.YAML
+        );
+
+        getServer().getPluginManager()
+            .registerEvents(new CoreListener(this), this);
+
         getLogger().info("FrankensteinCore успешно запущен!");
     }
 
     @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        String cmd = command.getName().toLowerCase();
+    public void onDisable() {
+        if (homes != null) homes.save();
+        if (mutes != null) mutes.save();
+    }
 
+    private boolean admin(Player p) {
+        if (!p.isOp()) {
+            p.sendMessage("§cНедостаточно прав!");
+            return false;
+        }
+        return true;
+    }
+
+    public boolean isMuted(String name) {
+        return mutes.getBoolean(name.toLowerCase(Locale.ROOT));
+    }
+
+    @Override
+    public boolean onCommand(
+        CommandSender sender,
+        Command command,
+        String label,
+        String[] args
+    ) {
         if (!(sender instanceof Player)) {
-            sender.sendMessage("Эту команду может использовать только игрок.");
+            sender.sendMessage("Команда доступна только игрокам.");
             return true;
         }
 
         Player p = (Player) sender;
-        String name = p.getName().toLowerCase();
+        String name = p.getName().toLowerCase(Locale.ROOT);
+        String cmd = command.getName().toLowerCase(Locale.ROOT);
 
         switch (cmd) {
+
             case "sethome":
-                homes.set(name, p.getLocation().getX() + "," +
-                    p.getLocation().getY() + "," +
-                    p.getLocation().getZ() + "," +
-                    p.getLevel().getName());
+                Location loc = p.getLocation();
+
+                homes.set(name,
+                    loc.getX() + ";" +
+                    loc.getY() + ";" +
+                    loc.getZ() + ";" +
+                    p.getLevel().getFolderName() + ";" +
+                    loc.getYaw() + ";" +
+                    loc.getPitch()
+                );
                 homes.save();
                 p.sendMessage("§aДом сохранён!");
                 return true;
 
             case "home":
                 String home = homes.getString(name, "");
+
                 if (home.isEmpty()) {
-                    p.sendMessage("§cУ тебя нет дома.");
+                    p.sendMessage("§cДом не найден.");
                     return true;
                 }
-                String[] h = home.split(",");
-                backs.put(name, p.getLocation());
-                p.teleport(new cn.nukkit.level.Location(
-                    Double.parseDouble(h[0]),
-                    Double.parseDouble(h[1]),
-                    Double.parseDouble(h[2]),
-                    p.getLevel(),
-                    0, 0
-                ));
-                p.sendMessage("§aТелепортация домой!");
+
+                try {
+                    String[] h = home.split(";");
+                    Level level = getServer().getLevelByName(h[3]);
+
+                    if (level == null) {
+                        p.sendMessage("§cМир дома не найден.");
+                        return true;
+                    }
+
+                    backs.put(name, p.getLocation());
+
+                    p.teleport(new Location(
+                        Double.parseDouble(h[0]),
+                        Double.parseDouble(h[1]),
+                        Double.parseDouble(h[2]),
+                        Double.parseDouble(h[4]),
+                        Double.parseDouble(h[5]),
+                        level
+                    ));
+
+                    p.sendMessage("§aТы дома!");
+                } catch (Exception e) {
+                    p.sendMessage("§cОшибка данных дома.");
+                }
                 return true;
 
             case "delhome":
@@ -81,93 +140,180 @@ public class FrankensteinCore extends PluginBase {
                     p.sendMessage("§cИспользуй: /tpa <игрок>");
                     return true;
                 }
+
                 Player target = getServer().getPlayer(args[0]);
+
                 if (target == null) {
                     p.sendMessage("§cИгрок не найден.");
                     return true;
                 }
-                requests.put(target.getName().toLowerCase(), name);
-                target.sendMessage("§eИгрок " + p.getName() + " просит телепортацию. /tpaccept или /tpdeny");
-                p.sendMessage("§aЗапрос отправлен.");
+
+                if (target == p) {
+                    p.sendMessage("§cНельзя отправить запрос самому себе.");
+                    return true;
+                }
+
+                requests.put(
+                    target.getName().toLowerCase(Locale.ROOT),
+                    name
+                );
+
+                target.sendMessage(
+                    "§eИгрок " + p.getName() +
+                    " хочет телепортироваться к тебе. /tpaccept или /tpdeny"
+                );
+
+                p.sendMessage("§aЗапрос отправлен!");
                 return true;
 
             case "tpaccept":
                 String requester = requests.remove(name);
+
                 if (requester == null) {
                     p.sendMessage("§cНет запросов.");
                     return true;
                 }
+
                 Player from = getServer().getPlayer(requester);
-                if (from != null) {
-                    backs.put(requester, from.getLocation());
-                    from.teleport(p);
-                    from.sendMessage("§aЗапрос принят.");
+
+                if (from == null) {
+                    p.sendMessage("§cИгрок уже вышел.");
+                    return true;
                 }
+
+                backs.put(requester, from.getLocation());
+                from.teleport(p.getLocation());
+
+                from.sendMessage("§aЗапрос принят!");
+                p.sendMessage("§aТелепортация выполнена.");
                 return true;
 
             case "tpdeny":
-                requests.remove(name);
+                String denied = requests.remove(name);
+
+                if (denied == null) {
+                    p.sendMessage("§cНет запросов.");
+                    return true;
+                }
+
+                Player deniedPlayer = getServer().getPlayer(denied);
+
+                if (deniedPlayer != null) {
+                    deniedPlayer.sendMessage("§cЗапрос отклонён.");
+                }
+
                 p.sendMessage("§eЗапрос отклонён.");
                 return true;
 
             case "back":
-                cn.nukkit.level.Location back = backs.get(name);
+                Location back = backs.remove(name);
+
                 if (back == null) {
                     p.sendMessage("§cНет предыдущего места.");
                     return true;
                 }
+
                 p.teleport(back);
+                p.sendMessage("§aВозвращение выполнено.");
+                return true;
+
+            case "spawn":
+                Level defaultLevel = getServer().getDefaultLevel();
+
+                if (defaultLevel != null) {
+                    backs.put(name, p.getLocation());
+                    p.teleport(Location.fromObject(
+                        defaultLevel.getSafeSpawn()
+                    ));
+                    p.sendMessage("§aТы на спавне!");
+                }
                 return true;
 
             case "fly":
-                if (!p.isOp()) {
-                    p.sendMessage("§cНет прав.");
-                    return true;
-                }
+                if (!admin(p)) return true;
+
                 boolean fly = !flying.getOrDefault(name, false);
                 flying.put(name, fly);
                 p.setAllowFlight(fly);
-                p.sendMessage(fly ? "§aПолёт включён." : "§cПолёт выключен.");
+
+                p.sendMessage(fly
+                    ? "§aПолёт включён."
+                    : "§cПолёт выключен."
+                );
                 return true;
 
             case "v":
-                if (!p.isOp()) {
-                    p.sendMessage("§cНет прав.");
-                    return true;
-                }
+                if (!admin(p)) return true;
+
                 boolean hide = !vanished.getOrDefault(name, false);
                 vanished.put(name, hide);
-                for (Player online : getServer().getOnlinePlayers().values()) {
-                    if (hide) online.hidePlayer(p);
-                    else online.showPlayer(p);
+
+                for (Player online : getServer()
+                    .getOnlinePlayers().values()) {
+
+                    if (hide) {
+                        online.hidePlayer(p);
+                    } else {
+                        online.showPlayer(p);
+                    }
                 }
-                p.sendMessage(hide ? "§aНевидимость включена." : "§cНевидимость выключена.");
+
+                p.sendMessage(hide
+                    ? "§aНевидимость включена."
+                    : "§cНевидимость выключена."
+                );
+                return true;
+
+            case "gm":
+                if (!admin(p)) return true;
+
+                if (args.length != 1) {
+                    p.sendMessage("§cИспользуй: /gm 0, 1, 2 или 3");
+                    return true;
+                }
+
+                try {
+                    int mode = Integer.parseInt(args[0]);
+
+                    if (mode < 0 || mode > 3) {
+                        p.sendMessage("§cРежим должен быть от 0 до 3.");
+                        return true;
+                    }
+
+                    p.setGamemode(mode);
+                    p.sendMessage("§aРежим игры изменён.");
+                } catch (NumberFormatException e) {
+                    p.sendMessage("§cУкажи число от 0 до 3.");
+                }
                 return true;
 
             case "mute":
-                if (!p.isOp() || args.length < 1) {
+                if (!admin(p)) return true;
+
+                if (args.length < 1) {
                     p.sendMessage("§cИспользуй: /mute <игрок>");
                     return true;
                 }
-                mutes.set(args[0].toLowerCase(), true);
+
+                mutes.set(args[0].toLowerCase(Locale.ROOT), true);
                 mutes.save();
-                p.sendMessage("§aИгроку выдан мут.");
+                p.sendMessage("§aМут выдан.");
                 return true;
 
             case "unmute":
-                if (!p.isOp() || args.length < 1) {
+                if (!admin(p)) return true;
+
+                if (args.length < 1) {
                     p.sendMessage("§cИспользуй: /unmute <игрок>");
                     return true;
                 }
-                mutes.remove(args[0].toLowerCase());
+
+                mutes.remove(args[0].toLowerCase(Locale.ROOT));
                 mutes.save();
                 p.sendMessage("§aМут снят.");
                 return true;
         }
+
         return false;
     }
-
-    public boolean isMuted(String name) {
-        return mutes.getBoolean(name.toLowerCase(), false);
-    }
-}
+                                                    }
