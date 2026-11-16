@@ -430,8 +430,3 @@ public class FrankensteinCore extends PluginBase {
                 return true;
             }
         }
-
-        return false;
-    }
-                }
-                    
